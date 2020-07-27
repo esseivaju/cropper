@@ -1,7 +1,6 @@
 import cv2
 import os
 import numpy as np
-import threading
 import logging
 
 logger = logging.getLogger(__name__)
@@ -58,13 +57,13 @@ def get_crop_points(rect):
     dist_h = np.abs(dist_01 - h)
     dist_w = np.abs(dist_01 - w)
 
-    if dist_h < dist_w: # vertical box
+    if dist_h < dist_w:  # vertical box
         return w, h, box, np.array([
                             [0, h-1],
                             [0, 0],
                             [w-1, 0],
                             [w-1, h-1]], dtype="float32")
-    else: # horizontal box
+    else:  # horizontal box
         return w, h, box, np.array([
                             [w-1, h-1],
                             [0, h-1],
@@ -72,31 +71,55 @@ def get_crop_points(rect):
                             [w-1, 0]], dtype="float32")
 
 
-def process(filename, output_dir, save_intermediary=False):
-    #print(f"{threading.currentThread().getName()}: Processing {filename}")
-    basename = os.path.basename(filename)
-    img = cv2.imread(filename)
-    thresh = preprocess_img(img)
-    rect = find_page_area(thresh)
+def build_padded_rect(rect, do_rotate, margin=200):
+    width_margin = height_margin = margin
+    angle = -90 if do_rotate else 0
+    return (rect[0], (rect[1][0] + width_margin,
+                      rect[1][1] + height_margin), angle)
+
+
+def get_angle(rect):
     angle = rect[-1]
-    rect_angle = 0
     do_rotate = False
     if angle < -45:
         angle += 90
-        rect_angle = -90
         do_rotate = True
-    logger.debug(f"{filename} skew: {angle}")
+    return angle, do_rotate
+
+
+def get_bounding_rect_dims(img, margin):
+    thresh = preprocess_img(img)
+    rect = find_page_area(thresh)
+    angle, do_rotate = get_angle(rect)
+    rect = build_padded_rect(rect, do_rotate, margin)
+    return angle, do_rotate, rect
+
+
+def get_box(filename, response_queue):
+    img = cv2.imread(filename)
+    thresh = preprocess_img(img)
+    rect = find_page_area(thresh)
+    response_queue.put(rect)
+
+
+def process(filename, output_dir, args, save_intermediary=False, box_dim=None):
+    basename = os.path.basename(filename)
+    img = cv2.imread(filename)
+    angle, do_rotate, rect = get_bounding_rect_dims(img, margin=args.padding_size)
+
+    # if we already have a box then do not do the rotation and forget angle as the box is correctly oriented
+    if args.uniform_size and box_dim:
+        rect = (rect[0], box_dim, 0)
+        do_rotate = False
+        rect = build_padded_rect(rect, do_rotate, margin=args.padding_size)
+
     (h, w) = img.shape[:2]
     center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    img = cv2.warpAffine(img, M, (w, h),
-                         flags=cv2.INTER_CUBIC,
-                         borderMode=cv2.BORDER_REPLICATE)
-
-    width_margin = 200
-    height_margin = 200
-    rect = (rect[0], (rect[1][0] + width_margin,
-                      rect[1][1] + height_margin), rect_angle)
+    if not args.ignore_realign:
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        img = cv2.warpAffine(img, M, (w, h),
+                             flags=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_REPLICATE)
 
     w, h, src_pts, dst_pts = get_crop_points(rect)
 
@@ -113,7 +136,7 @@ def process(filename, output_dir, save_intermediary=False):
     if save_intermediary:
         no_ext = basename[:basename.find(".tif")]
         cv2.imwrite(os.path.join(output_dir, f"{no_ext}_area.png"), img)
-        cv2.imwrite(os.path.join(output_dir, f"{no_ext}_internal.png"), thresh)
+        # cv2.imwrite(os.path.join(output_dir, f"{no_ext}_internal.png"), thresh)
     cv2.imwrite(os.path.join(output_dir, basename), warped)
 
 
