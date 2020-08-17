@@ -59,23 +59,28 @@ def get_crop_points(rect):
 
     if dist_h < dist_w:  # vertical box
         return w, h, box, np.array([
-                            [0, h-1],
-                            [0, 0],
-                            [w-1, 0],
-                            [w-1, h-1]], dtype="float32")
+            [0, h - 1],
+            [0, 0],
+            [w - 1, 0],
+            [w - 1, h - 1]], dtype="float32")
     else:  # horizontal box
         return w, h, box, np.array([
-                            [w-1, h-1],
-                            [0, h-1],
-                            [0, 0],
-                            [w-1, 0]], dtype="float32")
+            [w - 1, h - 1],
+            [0, h - 1],
+            [0, 0],
+            [w - 1, 0]], dtype="float32")
 
 
-def build_padded_rect(rect, do_rotate, margin=200):
+def build_padded_rect(rect, do_rotate, margin=200, max_size=None):
     width_margin = height_margin = margin
     angle = -90 if do_rotate else 0
-    return (rect[0], (rect[1][0] + width_margin,
-                      rect[1][1] + height_margin), angle)
+    w = rect[1][0] + width_margin
+    h = rect[1][1] + height_margin
+    if max_size:
+        w = min(max_size[0], w)
+        h = min(max_size[1], h)
+    return (rect[0], (w,
+                      h), angle)
 
 
 def get_angle(rect):
@@ -87,31 +92,42 @@ def get_angle(rect):
     return angle, do_rotate
 
 
-def get_bounding_rect_dims(img, margin):
+def get_bounding_rect_dims(img, margin, max_size=None):
     thresh = preprocess_img(img)
     rect = find_page_area(thresh)
     angle, do_rotate = get_angle(rect)
-    rect = build_padded_rect(rect, do_rotate, margin)
+    rect = build_padded_rect(rect, do_rotate, margin, max_size)
     return angle, do_rotate, rect
 
 
-def get_box(filename, response_queue):
+def get_box(filename, response_queue, bounds=None):
     img = cv2.imread(filename)
     thresh = preprocess_img(img)
     rect = find_page_area(thresh)
+    if bounds:
+        min_box, max_box = bounds
+        box_dim = rect[1]
+        box_dim_width, box_dim_height = box_dim[0], box_dim[1]
+        if box_dim_width > box_dim_height:
+            tmp = box_dim_height
+            box_dim_height = box_dim_width
+            box_dim_width = tmp
+        if box_dim_width > max_box[0] or box_dim_width < min_box[0] or box_dim_height > max_box[1] or box_dim_height < min_box[1]:
+            return
+
     response_queue.put(rect)
 
 
 def process(filename, output_dir, args, save_intermediary=False, box_dim=None):
     basename = os.path.basename(filename)
     img = cv2.imread(filename)
-    angle, do_rotate, rect = get_bounding_rect_dims(img, margin=args.padding_size)
+    angle, do_rotate, rect = get_bounding_rect_dims(img, margin=args.padding_size, max_size=box_dim)
 
     # if we already have a box then do not do the rotation and forget angle as the box is correctly oriented
     if args.uniform_size and box_dim:
         rect = (rect[0], box_dim, 0)
         do_rotate = False
-        rect = build_padded_rect(rect, do_rotate, margin=args.padding_size)
+        rect = build_padded_rect(rect, do_rotate, margin=args.padding_size, max_size=box_dim)
 
     (h, w) = img.shape[:2]
     center = (w // 2, h // 2)
