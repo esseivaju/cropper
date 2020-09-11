@@ -25,12 +25,12 @@ if __name__ == "__main__":
     parser.add_argument("--src", required=True, help="Source directory containing tif data")
     parser.add_argument("--dst", required=True, help="Destination director where cropped image are saved")
     parser.add_argument("--uniform-size", action="store_true", help="If set, performs a 1st pass across data to find the largest crop region and apply the same crop box to each picture")
-    parser.add_argument("--padding-size", default=200, help="Padding area added to the bounding box")
+    parser.add_argument("--padding-size", default=200, type=int, help="Padding area added to the bounding box. Avoid cutting text close to the edge of the box")
     parser.add_argument('--ignore-realign', action="store_true", help="If set, do not try to rotate picture to deskew the text ")
-    parser.add_argument('--min-box', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'))
-    parser.add_argument('--max-box', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'))
+    parser.add_argument('--min-box', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help="Restricts the detected page area to have a larger width/height")
+    parser.add_argument('--max-box', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help="Restricts te detected page area to have a smaller width/heigt. The resulting images will never be larger than the box specified here, even taking into account the padding size")
     parser.add_argument("--workers",
-                        default=os.cpu_count() * 5,
+                        default=os.cpu_count(),
                         help="Number of workers to use. Default to the number of cpu cores")
     args = parser.parse_args()
 

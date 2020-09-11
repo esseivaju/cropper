@@ -28,7 +28,9 @@ photoworkshop_cropper --help # You have access to cli command again
  ## Usage
 ```
 usage: photoworkshop_cropper [-h] --src SRC --dst DST [--uniform-size]
-                             [--padding-size PADDING_SIZE] [--workers WORKERS]
+                             [--padding-size PADDING_SIZE] [--ignore-realign]
+                             [--min-box WIDTH HEIGHT] [--max-box WIDTH HEIGHT]
+                             [--workers WORKERS]
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -38,7 +40,18 @@ optional arguments:
                         largest crop region and apply the same crop box to
                         each picture
   --padding-size PADDING_SIZE
-                        Padding area added to the bounding box
+                        Padding area added to the bounding box. Avoid cutting
+                        text close to the edge of the box
+  --ignore-realign      If set, do not try to rotate picture to deskew the
+                        text
+  --min-box WIDTH HEIGHT
+                        Restricts the detected page area to have a larger
+                        width/height
+  --max-box WIDTH HEIGHT
+                        Restricts te detected page area to have a smaller
+                        width/heigt. The resulting images will never be larger
+                        than the box specified here, even taking into account
+                        the padding size
   --workers WORKERS     Number of workers to use. Default to the number of cpu
                         cores
 ```
