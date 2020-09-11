@@ -7,48 +7,63 @@ logger = logging.getLogger(__name__)
 
 
 def preprocess_img(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
     # smooth the image to avoid noises
     gray = cv2.medianBlur(gray, 5)
 
     # Apply adaptive threshold
-    ret, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_TOZERO_INV)
+    ret, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_TOZERO_INV)
 
     thresh = cv2.dilate(thresh, None, iterations=50)
     thresh = cv2.erode(thresh, None, iterations=50)
     return thresh
 
 
-def find_page_area(img):
+def find_page_area(img, debug_img=None, max_size=None):
     # Find the contours
     contours, hierarchy = cv2.findContours(
         img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
     max_area = 0
     contours_filtered = []
+    areas = []
     for cnt in contours:
         a = cv2.contourArea(cnt)
-        if a > max_area:
-            max_area = a
+        if a > 100:
+            areas.append(a)
+            if a > max_area:
+                max_area = a
 
-    for cnt in contours:
-        a = cv2.contourArea(cnt)
-        if a < max_area and a > 100:
-            rect = cv2.minAreaRect(cnt)
+    for cnt, a in zip(contours, areas):
+        rect = cv2.minAreaRect(cnt)
+        r_w, r_h = rect[1]
+        if max_size:
+            if r_w < max_size[0] and r_h < max_size[1]:
+                contours_filtered.append(cnt)
+        else:
             contours_filtered.append(cnt)
-            box = cv2.boxPoints(rect)
-            box = np.int0(box)
 
+    if debug_img:
+        internal_img = cv2.drawContours(img, contours_filtered, -1, (255, 255, 255), 10)
     contours_all = np.concatenate(contours_filtered, axis=0)
     hull = cv2.convexHull(contours_all)
+    #if debug_img:
+    #    internal_img = cv2.drawContours(internal_img, hull, -1, (255, 255, 255), 10)
+    
     rect = cv2.minAreaRect(hull)
+
+    if debug_img:
+        box = np.int0(cv2.boxPoints(rect))
+        internal_img = cv2.drawContours(internal_img, [box], -1, (255, 255, 255), 20)
+
+    if debug_img:
+        cv2.imwrite(debug_img, internal_img)
     return rect
 
 
-def get_crop_points(rect):
-
-    box = cv2.boxPoints(rect)
+def is_vertical_box(rect):
+    box = cv2.boxPoints(rect)  # returns 4 points, starting with lowest then clockwise
+    start_bot_left = box[0][0] > box[1][0]
     dist_01 = int(cv2.norm(box[0], box[1]))
     box = np.int0(box)
     w = int(rect[1][0])
@@ -56,8 +71,13 @@ def get_crop_points(rect):
 
     dist_h = np.abs(dist_01 - h)
     dist_w = np.abs(dist_01 - w)
+    return dist_h < dist_w, w, h, box
 
-    if dist_h < dist_w:  # vertical box
+
+def get_crop_points(rect):
+    vertical, w, h, box = is_vertical_box(rect)
+
+    if vertical:  # vertical box
         return w, h, box, np.array([
             [0, h - 1],
             [0, 0],
@@ -92,9 +112,9 @@ def get_angle(rect):
     return angle, do_rotate
 
 
-def get_bounding_rect_dims(img, margin, max_size=None):
+def get_bounding_rect_dims(img, margin, max_size=None, debug_img=None):
     thresh = preprocess_img(img)
-    rect = find_page_area(thresh)
+    rect = find_page_area(thresh, debug_img, max_size)
     angle, do_rotate = get_angle(rect)
     rect = build_padded_rect(rect, do_rotate, margin, max_size)
     return angle, do_rotate, rect
@@ -103,17 +123,18 @@ def get_bounding_rect_dims(img, margin, max_size=None):
 def get_box(filename, response_queue, bounds=None):
     img = cv2.imread(filename)
     thresh = preprocess_img(img)
-    rect = find_page_area(thresh)
     if bounds:
         min_box, max_box = bounds
-        box_dim = rect[1]
-        box_dim_width, box_dim_height = box_dim[0], box_dim[1]
+        rect = find_page_area(thresh, max_size=max_box)
+        box_dim_width, box_dim_height = rect[1][0], rect[1][1]
         if box_dim_width > box_dim_height:
             tmp = box_dim_height
             box_dim_height = box_dim_width
             box_dim_width = tmp
         if box_dim_width > max_box[0] or box_dim_width < min_box[0] or box_dim_height > max_box[1] or box_dim_height < min_box[1]:
             return
+    else:
+        rect = find_page_area(thresh)
 
     response_queue.put(rect)
 
@@ -121,7 +142,7 @@ def get_box(filename, response_queue, bounds=None):
 def process(filename, output_dir, args, save_intermediary=False, box_dim=None):
     basename = os.path.basename(filename)
     img = cv2.imread(filename)
-    angle, do_rotate, rect = get_bounding_rect_dims(img, margin=args.padding_size, max_size=box_dim)
+    angle, do_rotate, rect = get_bounding_rect_dims(img, margin=args.padding_size, max_size=box_dim, debug_img=os.path.join(output_dir, f"{basename}.internal.tif"))
 
     # if we already have a box then do not do the rotation and forget angle as the box is correctly oriented
     if args.uniform_size and box_dim:
